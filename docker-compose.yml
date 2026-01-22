@@ -1,0 +1,70 @@
+services:
+  kubescope:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yocyber/kubescope-unified:1.3.1
+    container_name: kubescope
+    restart: unless-stopped
+    ports:
+      - "${KUBESCOPE_API_PORT:-8080}:8080"
+      - "${KUBESCOPE_WEB_PORT:-3000}:3000"
+    environment:
+      # API Config
+      KUBESCOPE_DATA_DIR: /data
+      KUBESCOPE_ENVIRONMENT: ${KUBESCOPE_ENVIRONMENT:-production}
+      KUBESCOPE_LOG_LEVEL: ${KUBESCOPE_LOG_LEVEL:-INFO}
+      # Web Config
+      KUBESCOPE_API_URL: http://localhost:8080
+      KUBESCOPE_CLUSTER_ID: ${KUBESCOPE_CLUSTER_ID:-default}
+      # NOTE: No default password - first admin must create credentials via UI
+      KUBESCOPE_API_KEY: ${KUBESCOPE_API_KEY:-}
+      NODE_ENV: production
+      # Database Config
+      DATABASE_URL: postgresql://kubescope:kubescope_password@postgres:5432/kubescope
+    volumes:
+      - kubescope-data:/data
+    healthcheck:
+      # Check both
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080/healthz && curl -f http://localhost:3000/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - kubescope-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: kubescope-postgres
+    restart: unless-stopped
+    # Best-effort tuning for container usage (assuming ~1GB+ available)
+    command: >
+      postgres -c shared_buffers=256MB -c effective_cache_size=768MB -c maintenance_work_mem=64MB -c checkpoint_completion_target=0.9 -c wal_buffers=16MB -c default_statistics_target=100 -c random_page_cost=1.1 -c effective_io_concurrency=200 -c work_mem=4MB -c min_wal_size=1GB -c max_wal_size=4GB
+    environment:
+      POSTGRES_USER: kubescope
+      POSTGRES_PASSWORD: kubescope_password
+      POSTGRES_DB: kubescope
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - kubescope-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U kubescope" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+volumes:
+  kubescope-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  kubescope-network:
+    driver: bridge
